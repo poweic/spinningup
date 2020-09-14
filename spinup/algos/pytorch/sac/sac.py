@@ -322,7 +322,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 update(data=batch)
 
         # End of epoch handling
-        if (t+1) % steps_per_epoch == 0:
+        if (t+1) % steps_per_epoch == 0 and t >= update_after:
             epoch = (t+1) // steps_per_epoch
 
             # Save model
