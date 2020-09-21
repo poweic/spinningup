@@ -16,14 +16,27 @@ class PPOBuffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, act_dim, size, gamma=0.99, lam=0.95):
-        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
-        self.adv_buf = np.zeros(size, dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.ret_buf = np.zeros(size, dtype=np.float32)
-        self.val_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
+    def __init__(self, obs_space, act_space, size, gamma=0.99, lam=0.95):
+        dtype=np.float32
+
+        if isinstance(obs_space, gym.spaces.Box):
+            obs_dim = obs_space.shape[0]
+            self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=dtype)
+        elif isinstance(obs_space, gym.spaces.Dict):
+            self.obs_buf = [None] * size
+        else:
+            raise RuntimeError(f"Only support Box or Dict obs_space. Got {type(obs_space)} instead.")
+
+        assert isinstance(act_space, gym.spaces.Box)
+
+        act_dim = act_space.shape
+        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=dtype)
+
+        self.adv_buf = np.zeros(size, dtype=dtype)
+        self.rew_buf = np.zeros(size, dtype=dtype)
+        self.ret_buf = np.zeros(size, dtype=dtype)
+        self.val_buf = np.zeros(size, dtype=dtype)
+        self.logp_buf = np.zeros(size, dtype=dtype)
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
 
@@ -79,8 +92,18 @@ class PPOBuffer:
         # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
+
+        if isinstance(self.obs_buf, list):
+            obs_buf = {
+                k: torch.as_tensor([obs[k] for obs in self.obs_buf])
+                for k, v in self.obs_buf[0].items()
+            }
+        else:
+            obs_buf = self.obs_buf
+
+        data = dict(obs=obs_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
+
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in data.items()}
 
 
@@ -88,7 +111,7 @@ class PPOBuffer:
 def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.2, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=dict(), save_freq=10):
+        target_kl=0.01, logger_kwargs=dict(), save_freq=10, use_gpu=False):
     """
     Proximal Policy Optimization (by clipping), 
 
@@ -206,11 +229,11 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Instantiate environment
     env = env_fn()
-    obs_dim = env.observation_space.shape
-    act_dim = env.action_space.shape
 
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    if use_gpu:
+        ac.cuda()
 
     # Sync params across processes
     sync_params(ac)
@@ -221,7 +244,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
+    buf = PPOBuffer(env.observation_space, env.action_space, local_steps_per_epoch, gamma, lam)
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
