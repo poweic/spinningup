@@ -1,6 +1,7 @@
 from mpi4py import MPI
 import os, subprocess, sys
 import numpy as np
+import torch
 
 
 def mpi_fork(n, bind_to_core=False):
@@ -54,6 +55,8 @@ def broadcast(x, root=0):
     MPI.COMM_WORLD.Bcast(x, root=root)
 
 def mpi_op(x, op):
+    if isinstance(x, torch.Tensor):
+        x = x.cpu().numpy()
     x, scalar = ([x], True) if np.isscalar(x) else (x, False)
     x = np.asarray(x, dtype=np.float32)
     buff = np.zeros_like(x, dtype=np.float32)
