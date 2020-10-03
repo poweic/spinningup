@@ -10,19 +10,8 @@ import spinup.algos.pytorch.ppo.core as core
 from spinup.utils.logx import EpochLogger
 from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
-
-def _generalize_to_dict(func):
-    @functools.wraps(func)
-    def wrapper(data, dtype=None, device="cuda"):  # None):
-        if isinstance(data, collections.abc.Mapping):
-            return type(data)(
-                {k: wrapper(v, dtype=dtype, device=device) for k, v in data.items()}
-            )
-        return func(data, dtype=dtype, device=device)
-
-    return wrapper
-
-my_as_tensor = _generalize_to_dict(torch.as_tensor)
+from spinup.utils.observation_buffer import ObservationBuffer
+from spinup.utils import torch_ext
 
 class PPOBuffer:
     """
@@ -31,16 +20,10 @@ class PPOBuffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_space, act_space, size, gamma=0.99, lam=0.95, device='cuda'):
+    def __init__(self, obs_space, act_space, size, gamma=0.99, lam=0.95, device=None):
         dtype=np.float32
 
-        if isinstance(obs_space, gym.spaces.Box):
-            obs_dim = obs_space.shape[0]
-            self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=dtype)
-        elif isinstance(obs_space, gym.spaces.Dict):
-            self.obs_buf = [None] * size
-        else:
-            raise RuntimeError(f"Only support Box or Dict obs_space. Got {type(obs_space)} instead.")
+        self.obs_buf = ObservationBuffer(obs_space, size, torch.float32, device)
 
         assert isinstance(act_space, gym.spaces.Box)
 
@@ -109,18 +92,10 @@ class PPOBuffer:
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
 
-        if isinstance(self.obs_buf, list):
-            obs_buf = {
-                k: torch.as_tensor([obs[k] for obs in self.obs_buf])
-                for k, v in self.obs_buf[0].items()
-            }
-        else:
-            obs_buf = self.obs_buf
-
-        data = dict(obs=obs_buf, act=self.act_buf, ret=self.ret_buf,
+        data = dict(obs=self.obs_buf.get(), act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
 
-        return {k: my_as_tensor(v, torch.float32, self.device) for k,v in data.items()}
+        return {k: torch_ext.as_tensor(v, torch.float32, self.device) for k,v in data.items()}
 
 
 
@@ -248,7 +223,9 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    device = None
     if use_gpu:
+        device = 'cuda'
         ac.cuda()
 
     # Sync params across processes
@@ -260,7 +237,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    buf = PPOBuffer(env.observation_space, env.action_space, local_steps_per_epoch, gamma, lam, device='cuda' if use_gpu else None)
+    buf = PPOBuffer(env.observation_space, env.action_space, local_steps_per_epoch, gamma, lam, device)
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
@@ -336,7 +313,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
         for t in range(local_steps_per_epoch):
-            a, v, logp = ac.step(my_as_tensor(o, torch.float32, 'cuda' if use_gpu else None))
+            a, v, logp = ac.step(torch_ext.as_tensor(o, torch.float32, device))
 
             next_o, r, d, _ = env.step(a)
             ep_ret += r
@@ -358,7 +335,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     print('Warning: trajectory cut off by epoch at %d steps.'%ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
                 if timeout or epoch_ended:
-                    _, v, _ = ac.step(my_as_tensor(o, torch.float32, 'cuda' if use_gpu else None))
+                    _, v, _ = ac.step(torch_ext.as_tensor(o, torch.float32, device))
                 else:
                     v = 0
                 buf.finish_path(v)

@@ -7,6 +7,8 @@ import gym
 import time
 import spinup.algos.pytorch.sac.core as core
 from spinup.utils.logx import EpochLogger
+from spinup.utils.observation_buffer import ObservationBuffer, convert_aos_to_soa
+from spinup.utils import torch_ext
 
 
 class ReplayBuffer:
@@ -14,13 +16,14 @@ class ReplayBuffer:
     A simple FIFO experience replay buffer for SAC agents.
     """
 
-    def __init__(self, obs_dim, act_dim, size):
-        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
-        self.obs2_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
+    def __init__(self, obs_space, act_dim, size, device=None):
+        self.obs_buf = ObservationBuffer(obs_space, size, torch.float32, device)
+        self.obs2_buf = ObservationBuffer(obs_space, size, torch.float32, device)
         self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.ptr, self.size, self.max_size = 0, 0, size
+        self.device = device
 
     def store(self, obs, act, rew, next_obs, done):
         self.obs_buf[self.ptr] = obs
@@ -33,20 +36,29 @@ class ReplayBuffer:
 
     def sample_batch(self, batch_size=32):
         idxs = np.random.randint(0, self.size, size=batch_size)
-        batch = dict(obs=self.obs_buf[idxs],
-                     obs2=self.obs2_buf[idxs],
+
+        # TODO(poweic): check if obs_buf is np.ndarray before calling convert_aos_to_soa
+        obs = self.obs_buf.get(idxs)
+        obs2 = self.obs2_buf.get(idxs)
+        # obs = convert_aos_to_soa(self.obs_buf[idxs], torch.float32, self.device)
+        # obs2 = convert_aos_to_soa(self.obs2_buf[idxs], torch.float32, self.device)
+
+        batch = dict(obs=obs,
+                     obs2=obs2,
                      act=self.act_buf[idxs],
                      rew=self.rew_buf[idxs],
                      done=self.done_buf[idxs])
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
-
+        return {
+            k: torch_ext.as_tensor(v, dtype=torch.float32, device=self.device)
+            for k,v in batch.items()
+        }
 
 
 def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
-        logger_kwargs=dict(), save_freq=1):
+        logger_kwargs=dict(), save_freq=1, use_gpu=False):
     """
     Soft Actor-Critic (SAC)
 
@@ -150,8 +162,9 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    env, test_env = env_fn(), env_fn()
-    obs_dim = env.observation_space.shape
+    # env, test_env = env_fn(), env_fn()
+    env = env_fn()
+    # obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape[0]
 
     # Action limit for clamping: critically, assumes all dimensions share the same bound!
@@ -159,7 +172,13 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Create actor-critic module and target networks
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    device = None
+    if use_gpu:
+        device = 'cuda'
+        ac.cuda()
     ac_targ = deepcopy(ac)
+    if use_gpu:
+        ac_targ.cuda()
 
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
     for p in ac_targ.parameters():
@@ -169,7 +188,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     q_params = itertools.chain(ac.q1.parameters(), ac.q2.parameters())
 
     # Experience buffer
-    replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
+    replay_buffer = ReplayBuffer(obs_space=env.observation_space, act_dim=act_dim, size=replay_size, device=device)
 
     # Count variables (protip: try to get a feel for how different size networks behave!)
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
@@ -199,8 +218,8 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_q = loss_q1 + loss_q2
 
         # Useful info for logging
-        q_info = dict(Q1Vals=q1.detach().numpy(),
-                      Q2Vals=q2.detach().numpy())
+        q_info = dict(Q1Vals=q1.detach().cpu().numpy(),
+                      Q2Vals=q2.detach().cpu().numpy())
 
         return loss_q, q_info
 
@@ -216,7 +235,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_pi = (alpha * logp_pi - q_pi).mean()
 
         # Useful info for logging
-        pi_info = dict(LogPi=logp_pi.detach().numpy())
+        pi_info = dict(LogPi=logp_pi.detach().cpu().numpy())
 
         return loss_pi, pi_info
 
@@ -264,7 +283,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 p_targ.data.add_((1 - polyak) * p.data)
 
     def get_action(o, deterministic=False):
-        return ac.act(torch.as_tensor(o, dtype=torch.float32), 
+        return ac.act(torch_ext.as_tensor(o, dtype=torch.float32, device=device), 
                       deterministic)
 
     def test_agent():
@@ -321,6 +340,8 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 batch = replay_buffer.sample_batch(batch_size)
                 update(data=batch)
 
+        # if t % 100 == 0: print ("t: ", t)
+
         # End of epoch handling
         if (t+1) % steps_per_epoch == 0 and t >= update_after:
             epoch = (t+1) // steps_per_epoch
@@ -330,14 +351,14 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 logger.save_state({'env': env}, None)
 
             # Test the performance of the deterministic version of the agent.
-            test_agent()
+            # test_agent()
 
             # Log info about epoch
             logger.log_tabular('Epoch', epoch)
             logger.log_tabular('EpRet', with_min_and_max=True)
-            logger.log_tabular('TestEpRet', with_min_and_max=True)
+            # logger.log_tabular('TestEpRet', with_min_and_max=True)
             logger.log_tabular('EpLen', average_only=True)
-            logger.log_tabular('TestEpLen', average_only=True)
+            # logger.log_tabular('TestEpLen', average_only=True)
             logger.log_tabular('TotalEnvInteracts', t)
             logger.log_tabular('Q1Vals', with_min_and_max=True)
             logger.log_tabular('Q2Vals', with_min_and_max=True)
