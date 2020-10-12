@@ -29,7 +29,11 @@ class ObservationBuffer:
         if index is None:
             _buf = self._buf
         else:
-            _buf = self._buf[index]
+            if isinstance(self._buf, np.ndarray):
+                _buf = self._buf[index]
+            else:
+                indices = np.arange(len(self._buf))[index]
+                _buf = [self._buf[i] for i in indices]
 
         if isinstance(self._buf, np.ndarray):
             return _buf
