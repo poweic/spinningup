@@ -159,6 +159,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
 
+    # Random seed
     torch.manual_seed(seed)
     np.random.seed(seed)
 
