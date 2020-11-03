@@ -62,6 +62,10 @@ class SquashedGaussianMLPActor(nn.Module):
             logp_pi = None
 
         pi_action = torch.tanh(pi_action)
+
+        if isinstance(self.act_limit, np.ndarray):
+            self.act_limit = pi_action.new(self.act_limit)
+
         pi_action = self.act_limit * pi_action
 
         return pi_action, logp_pi
@@ -85,7 +89,7 @@ class MLPActorCritic(nn.Module):
 
         obs_dim = observation_space.shape[0]
         act_dim = action_space.shape[0]
-        act_limit = action_space.high[0]
+        act_limit = action_space.high
 
         # build policy and value functions
         self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
