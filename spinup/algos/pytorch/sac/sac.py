@@ -180,7 +180,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
     for p in ac_targ.parameters():
         p.requires_grad = False
-        
+
     # List of parameters for both Q-networks (save this for convenience)
     q_params = itertools.chain(ac.q1.parameters(), ac.q2.parameters())
 
@@ -345,7 +345,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
             # Save model
             if (epoch % save_freq == 0) or (epoch == epochs):
-                logger.save_state({'env': env}, None)
+                logger.save_state({'env': env}, itr=epoch)
 
             # Test the performance of the deterministic version of the agent.
             # test_agent()
