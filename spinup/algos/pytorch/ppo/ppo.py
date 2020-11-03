@@ -12,6 +12,7 @@ from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg
 from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from spinup.utils.observation_buffer import ObservationBuffer
 from spinup.utils import torch_ext
+from spinup.utils import helper
 
 class PPOBuffer:
     """
@@ -28,7 +29,7 @@ class PPOBuffer:
         assert isinstance(act_space, gym.spaces.Box)
 
         act_dim = act_space.shape
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=dtype)
+        self.act_buf = np.zeros(helper.combined_shape(size, act_dim), dtype=dtype)
 
         self.adv_buf = np.zeros(size, dtype=dtype)
         self.rew_buf = np.zeros(size, dtype=dtype)
@@ -222,6 +223,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    print (ac)
     device = None
     if use_gpu:
         device = 'cuda'
@@ -231,7 +233,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     sync_params(ac)
 
     # Count variables
-    var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
+    var_counts = tuple(helper.count_vars(module) for module in [ac.pi, ac.v])
     logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n'%var_counts)
 
     # Set up experience buffer

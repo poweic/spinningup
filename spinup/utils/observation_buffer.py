@@ -2,8 +2,8 @@ import gym
 import torch
 import numpy as np
 
-import spinup.algos.pytorch.ppo.core as core
 from spinup.utils.torch_ext import as_tensor
+from spinup.utils import helper
 
 class ObservationBuffer:
     def __init__(self, obs_space, size, dtype=torch.float32, device=None):
@@ -13,7 +13,7 @@ class ObservationBuffer:
 
         if isinstance(obs_space, gym.spaces.Box):
             obs_dim = obs_space.shape[0]
-            self._buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
+            self._buf = np.zeros(helper.combined_shape(size, obs_dim), dtype=np.float32)
         elif isinstance(obs_space, gym.spaces.Dict):
             self._buf = [None] * size
         else:

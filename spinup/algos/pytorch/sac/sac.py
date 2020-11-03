@@ -5,10 +5,12 @@ import torch
 from torch.optim import Adam
 import gym
 import time
+
 import spinup.algos.pytorch.sac.core as core
 from spinup.utils.logx import EpochLogger
 from spinup.utils.observation_buffer import ObservationBuffer, convert_aos_to_soa
 from spinup.utils import torch_ext
+from spinup.utils import helper
 
 
 class ReplayBuffer:
@@ -19,7 +21,7 @@ class ReplayBuffer:
     def __init__(self, obs_space, act_dim, size, device=None):
         self.obs_buf = ObservationBuffer(obs_space, size, torch.float32, device)
         self.obs2_buf = ObservationBuffer(obs_space, size, torch.float32, device)
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
+        self.act_buf = np.zeros(helper.combined_shape(size, act_dim), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.ptr, self.size, self.max_size = 0, 0, size
@@ -170,6 +172,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Create actor-critic module and target networks
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    print (ac)
     device = None
     if use_gpu:
         device = 'cuda'
@@ -189,7 +192,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     replay_buffer = ReplayBuffer(obs_space=env.observation_space, act_dim=act_dim, size=replay_size, device=device)
 
     # Count variables (protip: try to get a feel for how different size networks behave!)
-    var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
+    var_counts = tuple(helper.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
     logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d\n'%var_counts)
 
     # Set up function for computing SAC Q-losses
