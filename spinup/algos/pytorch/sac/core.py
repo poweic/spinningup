@@ -14,10 +14,10 @@ LOG_STD_MIN = -20
 
 class SquashedGaussianMLPActor(nn.Module):
 
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection=False):
         super().__init__()
 
-        self.net = BasicMLP(obs_dim, act_dim * 2, list(hidden_sizes))
+        self.net = BasicMLP(obs_dim, act_dim * 2, list(hidden_sizes), activation, skip_connection)
 
         self.act_limit = act_limit
 
@@ -58,9 +58,9 @@ class SquashedGaussianMLPActor(nn.Module):
 
 class MLPQFunction(nn.Module):
 
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection=False):
         super().__init__()
-        self.q = BasicMLP(obs_dim + act_dim, 1, list(hidden_sizes), activation)
+        self.q = BasicMLP(obs_dim + act_dim, 1, list(hidden_sizes), activation, skip_connection)
 
     def forward(self, obs, act):
         q = self.q(torch.cat([obs, act], dim=-1))
@@ -69,7 +69,7 @@ class MLPQFunction(nn.Module):
 class MLPActorCritic(nn.Module):
 
     def __init__(self, observation_space, action_space, hidden_sizes=(256,256),
-                 activation=nn.ReLU):
+                 activation=nn.ReLU, skip_connection=False):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
@@ -77,9 +77,9 @@ class MLPActorCritic(nn.Module):
         act_limit = action_space.high
 
         # build policy and value functions
-        self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
-        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
-        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
+        self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection)
+        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection)
+        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection)
 
     def act(self, obs, deterministic=False):
         with torch.no_grad():
