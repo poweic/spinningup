@@ -167,11 +167,12 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # env, test_env = env_fn(), env_fn()
     env = env_fn()
-    # obs_dim = env.observation_space.shape
-    act_dim = env.action_space.shape[0]
+    action_space = env.action_space
+    action_space.seed(seed)
+    act_dim = action_space.shape[0]
 
     # Create actor-critic module and target networks
-    ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    ac = actor_critic(env.observation_space, action_space, **ac_kwargs)
     print (ac)
     device = None
     if use_gpu:
@@ -311,7 +312,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         if t > start_steps:
             a = get_action(o)
         else:
-            a = env.action_space.sample()
+            a = action_space.sample()
 
         # Step the env
         o2, r, d, _ = env.step(a)

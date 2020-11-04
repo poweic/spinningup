@@ -220,9 +220,11 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Instantiate environment
     env = env_fn()
+    action_space = env.action_space
+    action_space.seed(seed)
 
     # Create actor-critic module
-    ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    ac = actor_critic(env.observation_space, action_space, **ac_kwargs)
     print (ac)
     device = None
     if use_gpu:
@@ -238,7 +240,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Set up experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    buf = PPOBuffer(env.observation_space, env.action_space, local_steps_per_epoch, gamma, lam, device)
+    buf = PPOBuffer(env.observation_space, action_space, local_steps_per_epoch, gamma, lam, device)
 
     # Set up function for computing PPO policy loss
     def compute_loss_pi(data):
