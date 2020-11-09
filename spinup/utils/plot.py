@@ -12,44 +12,42 @@ DIV_LINE_WIDTH = 50
 exp_idx = 0
 units = dict()
 
-def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1", smooth=1, **kwargs):
-    if smooth > 1:
-        """
-        smooth data with moving window average.
-        that is,
-            smoothed_y[t] = average(y[t-k], y[t-k+1], ..., y[t+k-1], y[t+k])
-        where the "smooth" param is width of that window (2k+1)
-        """
-        y = np.ones(smooth)
-        for datum in data:
-            x = np.asarray(datum[value])
-            z = np.ones(len(x))
-            smoothed_x = np.convolve(x,y,'same') / np.convolve(z,y,'same')
-            datum[value] = smoothed_x
+
+def moving_avg(x, N):
+    y = np.ones(int(N))
+    z = np.ones(len(x))
+    return np.convolve(x,y,'same') / np.convolve(z,y,'same')
+
+def exp_moving_avg(x, weight):  # Weight between 0 and 1
+    last = x[0]  # First value in the plot (first timestep)
+    smoothed = []
+    for point in x:
+        smoothed_val = last * weight + (1 - weight) * point  # Calculate smoothed value
+        smoothed.append(smoothed_val)                        # Save it
+        last = smoothed_val                                  # Anchor the last smoothed value
+    return smoothed
+
+def smooth_data_frame(data, key, smooth):
+    # smooth data with either a basic moving average or an exponential moving
+    # average (like those in TensorBoard)
+    for datum in data:
+        x = np.asarray(datum[key])
+        if smooth >= 1.:
+            datum[key] = moving_avg(x, smooth)
+        else:
+            datum[key] = exp_moving_avg(x, smooth)
+
+def plot_data(data, xaxis='Epoch', value="AverageEpRet", condition="Condition1", smooth=1., **kwargs):
+
+    smooth_data_frame(data, value, smooth)
 
     if isinstance(data, list):
         data = pd.concat(data, ignore_index=True)
+
     sns.set(style="darkgrid", font_scale=1.5)
-    sns.tsplot(data=data, time=xaxis, value=value, unit="Unit", condition=condition, ci='sd', **kwargs)
-    """
-    If you upgrade to any version of Seaborn greater than 0.8.1, switch from 
-    tsplot to lineplot replacing L29 with:
+    sns.lineplot(data=data, x=xaxis, y=value, hue=condition, ci='sd', **kwargs)
 
-        sns.lineplot(data=data, x=xaxis, y=value, hue=condition, ci='sd', **kwargs)
-
-    Changes the colorscheme and the default legend style, though.
-    """
-    plt.legend(loc='best').set_draggable(True)
-    #plt.legend(loc='upper center', ncol=3, handlelength=1,
-    #           borderaxespad=0., prop={'size': 13})
-
-    """
-    For the version of the legend used in the Spinning Up benchmarking page, 
-    swap L38 with:
-
-    plt.legend(loc='upper center', ncol=6, handlelength=1,
-               mode="expand", borderaxespad=0., prop={'size': 13})
-    """
+    plt.legend(loc='best', mode="expand").set_draggable(True)
 
     xscale = np.max(np.asarray(data[xaxis])) > 5e3
     if xscale:
@@ -171,7 +169,7 @@ def main():
     parser.add_argument('--xaxis', '-x', default='TotalEnvInteracts')
     parser.add_argument('--value', '-y', default='Performance', nargs='*')
     parser.add_argument('--count', action='store_true')
-    parser.add_argument('--smooth', '-s', type=int, default=1)
+    parser.add_argument('--smooth', '-s', type=float, default=1.)
     parser.add_argument('--select', nargs='*')
     parser.add_argument('--exclude', nargs='*')
     parser.add_argument('--est', default='mean')
@@ -214,7 +212,7 @@ def main():
             in random seed. But if you'd like to see all of those curves 
             separately, use the ``--count`` flag.
 
-        smooth (int): Smooth data by averaging it over a fixed window. This 
+        smooth (float): Smooth data by averaging it over a fixed window. This 
             parameter says how wide the averaging window will be.
 
         select (strings): Optional selection rule: the plotter will only show
