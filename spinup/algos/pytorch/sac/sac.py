@@ -60,7 +60,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
-        logger_kwargs=dict(), save_freq=1, use_gpu=False):
+        logger_kwargs=dict(), save_freq=1, use_gpu=False, learnable_temperature=False):
     """
     Soft Actor-Critic (SAC)
 
@@ -173,14 +173,17 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Create actor-critic module and target networks
     ac = actor_critic(env.observation_space, action_space, **ac_kwargs)
+    ac_targ = deepcopy(ac)
+    target_entropy = -act_dim
+
     print (ac)
     device = None
     if use_gpu:
         device = 'cuda'
         ac.cuda()
-    ac_targ = deepcopy(ac)
-    if use_gpu:
         ac_targ.cuda()
+
+    log_alpha = torch.tensor(np.log(alpha), requires_grad=True, device=next(ac.parameters()).device)
 
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
     for p in ac_targ.parameters():
@@ -212,7 +215,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             q1_pi_targ = ac_targ.q1(o2, a2)
             q2_pi_targ = ac_targ.q2(o2, a2)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ)
-            backup = r + gamma * (1 - d) * (q_pi_targ - alpha * logp_a2)
+            backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha.exp().detach() * logp_a2)
 
         # MSE loss against Bellman backup
         loss_q1 = ((q1 - backup)**2).mean()
@@ -234,7 +237,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         q_pi = torch.min(q1_pi, q2_pi)
 
         # Entropy-regularized policy loss
-        loss_pi = (alpha * logp_pi - q_pi).mean()
+        loss_pi = (log_alpha.exp().detach() * logp_pi - q_pi).mean()
 
         # Useful info for logging
         pi_info = dict(LogPi=logp_pi.detach().cpu().numpy())
@@ -242,6 +245,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         return loss_pi, pi_info
 
     # Set up optimizers for policy and q-function
+    log_alpha_optimizer = Adam([log_alpha], lr=lr)
     pi_optimizer = Adam(ac.pi.parameters(), lr=lr)
     q_optimizer = Adam(q_params, lr=lr)
 
@@ -268,6 +272,14 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_pi, pi_info = compute_loss_pi(data)
         loss_pi.backward()
         pi_optimizer.step()
+
+        if learnable_temperature:
+            log_alpha_optimizer.zero_grad()
+            log_prob = pi_info["LogPi"]
+            alpha_loss = log_alpha.exp() * ((-log_prob - target_entropy)).mean()
+            logger.store(Alpha=log_alpha.exp(), AlphaLoss=alpha_loss)
+            alpha_loss.backward()
+            log_alpha_optimizer.step()
 
         # Unfreeze Q-networks so you can optimize it at next DDPG step.
         for p in q_params:
@@ -367,6 +379,8 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.log_tabular('LogPi', with_min_and_max=True)
             logger.log_tabular('LossPi', average_only=True)
             logger.log_tabular('LossQ', average_only=True)
+            logger.log_tabular('Alpha', average_only=True)
+            logger.log_tabular('AlphaLoss', average_only=True)
             logger.log_tabular('Time', time.time()-start_time)
             logger.dump_tabular()
 
