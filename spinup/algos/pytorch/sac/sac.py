@@ -8,7 +8,7 @@ import time
 
 import spinup.algos.pytorch.sac.core as core
 from spinup.utils.logx import EpochLogger
-from spinup.utils.observation_buffer import ObservationBuffer, convert_aos_to_soa
+from spinup.utils.observation_buffer import ObservationBuffer
 from spinup.utils import torch_ext
 from spinup.utils import helper
 
@@ -39,11 +39,8 @@ class ReplayBuffer:
     def sample_batch(self, batch_size=32):
         idxs = np.random.randint(0, self.size, size=batch_size)
 
-        # TODO(poweic): check if obs_buf is np.ndarray before calling convert_aos_to_soa
         obs = self.obs_buf.get(idxs)
         obs2 = self.obs2_buf.get(idxs)
-        # obs = convert_aos_to_soa(self.obs_buf[idxs], torch.float32, self.device)
-        # obs2 = convert_aos_to_soa(self.obs2_buf[idxs], torch.float32, self.device)
 
         batch = dict(obs=obs,
                      obs2=obs2,
@@ -317,7 +314,6 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Main loop: collect experience in env and update/log each epoch
     for t in range(total_steps):
-        
         # Until start_steps have elapsed, randomly sample actions
         # from a uniform distribution for better exploration. Afterwards, 
         # use the learned policy. 
@@ -328,6 +324,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         # Step the env
         o2, r, d, _ = env.step(a)
+        # env.render(mode='human')
         ep_ret += r
         ep_len += 1
 
