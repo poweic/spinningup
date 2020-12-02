@@ -42,6 +42,6 @@ class ObservationBuffer:
 
 def convert_aos_to_soa(array_of_struct, dtype, device):
     return {
-        k: as_tensor([struct[k] for struct in array_of_struct], dtype, device)
+        k: as_tensor(np.array([struct[k] for struct in array_of_struct]), dtype, device)
         for k, v in array_of_struct[0].items()
     }
