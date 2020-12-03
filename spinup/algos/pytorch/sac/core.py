@@ -13,15 +13,16 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -20
 
 class SquashedGaussianMLPActor(nn.Module):
-
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection=False):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection=False, norm_layer=nn.Identity()):
         super().__init__()
 
+        self.norm_layer = norm_layer
         self.net = BasicMLP(obs_dim, act_dim * 2, list(hidden_sizes), activation, skip_connection)
 
-        self.act_limit = act_limit
+        self.act_limit = nn.Parameter(torch.Tensor(act_limit), requires_grad=False)
 
     def forward(self, obs, deterministic=False, with_logprob=True):
+        obs = self.norm_layer(obs)
         mu, log_std = self.net(obs).chunk(2, dim=-1)
 
         log_std = torch.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
@@ -48,28 +49,25 @@ class SquashedGaussianMLPActor(nn.Module):
 
         pi_action = torch.tanh(pi_action)
 
-        if isinstance(self.act_limit, np.ndarray):
-            self.act_limit = pi_action.new(self.act_limit)
-
         pi_action = self.act_limit * pi_action
 
         return pi_action, logp_pi
 
 
 class MLPQFunction(nn.Module):
-
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection=False):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection=False, norm_layer=nn.Identity()):
         super().__init__()
+        self.norm_layer = norm_layer
         self.q = BasicMLP(obs_dim + act_dim, 1, list(hidden_sizes), activation, skip_connection)
 
     def forward(self, obs, act):
+        obs = self.norm_layer(obs)
         q = self.q(torch.cat([obs, act], dim=-1))
         return torch.squeeze(q, -1) # Critical to ensure q has right shape.
 
 class MLPActorCritic(nn.Module):
-
     def __init__(self, observation_space, action_space, hidden_sizes=(256,256),
-                 activation=nn.ReLU, skip_connection=False):
+                 activation=nn.ReLU, skip_connection=False, norm_layer=nn.Identity()):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
@@ -77,9 +75,9 @@ class MLPActorCritic(nn.Module):
         act_limit = action_space.high
 
         # build policy and value functions
-        self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection)
-        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection)
-        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection)
+        self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit, skip_connection, norm_layer)
+        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection, norm_layer)
+        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation, skip_connection, norm_layer)
 
     def act(self, obs, deterministic=False):
         with torch.no_grad():

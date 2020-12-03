@@ -48,12 +48,13 @@ class Actor(nn.Module):
 
 
 class MLPCategoricalActor(Actor):
-
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection, norm_layer=nn.Identity()):
         super().__init__()
+        self.norm_layer = norm_layer
         self.logits_net = BasicMLP(obs_dim, act_dim, list(hidden_sizes), activation, skip_connection)
 
     def _distribution(self, obs):
+        obs = self.norm_layer(obs)
         logits = self.logits_net(obs)
         return Categorical(logits=logits)
 
@@ -62,14 +63,15 @@ class MLPCategoricalActor(Actor):
 
 
 class MLPGaussianActor(Actor):
-
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation, skip_connection, norm_layer=nn.Identity()):
         super().__init__()
+        self.norm_layer = norm_layer
         log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
         self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
         self.mu_net = BasicMLP(obs_dim, act_dim, list(hidden_sizes), activation, skip_connection)
 
     def _distribution(self, obs):
+        obs = self.norm_layer(obs)
         mu = self.mu_net(obs)
         std = torch.exp(self.log_std)
         return Normal(mu, std)
@@ -79,33 +81,31 @@ class MLPGaussianActor(Actor):
 
 
 class MLPCritic(nn.Module):
-
-    def __init__(self, obs_dim, hidden_sizes, activation, skip_connection):
+    def __init__(self, obs_dim, hidden_sizes, activation, skip_connection, norm_layer=nn.Identity()):
         super().__init__()
+        self.norm_layer = norm_layer
         self.v_net = BasicMLP(obs_dim, 1, list(hidden_sizes), activation, skip_connection)
 
     def forward(self, obs):
+        obs = self.norm_layer(obs)
         return torch.squeeze(self.v_net(obs), -1) # Critical to ensure v has right shape.
 
 
-
 class MLPActorCritic(nn.Module):
-
-
-    def __init__(self, observation_space, action_space, 
-                 hidden_sizes=(64,64), activation=nn.Tanh, skip_connection=False):
+    def __init__(self, observation_space, action_space,
+                 hidden_sizes=(64,64), activation=nn.Tanh, skip_connection=False, norm_layer=nn.Identity()):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
 
         # policy builder depends on action space
         if isinstance(action_space, Box):
-            self.pi = MLPGaussianActor(obs_dim, action_space.shape[0], hidden_sizes, activation, skip_connection)
+            self.pi = MLPGaussianActor(obs_dim, action_space.shape[0], hidden_sizes, activation, skip_connection, norm_layer)
         elif isinstance(action_space, Discrete):
-            self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation, skip_connection)
+            self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation, skip_connection, norm_layer)
 
         # build value function
-        self.v  = MLPCritic(obs_dim, hidden_sizes, activation, skip_connection)
+        self.v  = MLPCritic(obs_dim, hidden_sizes, activation, skip_connection, norm_layer)
 
     def step(self, obs):
         with torch.no_grad():
