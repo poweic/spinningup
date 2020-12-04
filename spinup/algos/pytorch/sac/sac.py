@@ -53,10 +53,10 @@ class ReplayBuffer:
         }
 
 
-def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
-        polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
-        update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
+def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
+        steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99,
+        polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000,
+        update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000,
         logger_kwargs=dict(), save_freq=1, use_gpu=False, learnable_temperature=False):
     """
     Soft Actor-Critic (SAC)
@@ -243,8 +243,8 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Set up optimizers for policy and q-function
     log_alpha_optimizer = Adam([log_alpha], lr=lr)
-    pi_optimizer = Adam(ac.pi.parameters(), lr=lr)
-    q_optimizer = Adam(q_params, lr=lr)
+    pi_optimizer = Adam(ac.pi.parameters(), lr=lr, weight_decay=1e-6)
+    q_optimizer = Adam(q_params, lr=lr, weight_decay=1e-6)
 
     # Set up model saving
     logger.setup_pytorch_saver(ac)
